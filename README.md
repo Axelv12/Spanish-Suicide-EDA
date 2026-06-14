@@ -29,8 +29,8 @@ The entire analysis and data visualization pipeline is built using **R**. The ma
 
 ## 📁 Repository Structure
 
-- `ProyectoAED.Rmd`: The main R Markdown document containing the source code, analysis, and visualizations.
-- `ProyectoAED.pdf`: The compiled report containing the results of the analysis.
+- `Spanish-Suicide-EDA.Rmd`: The main R Markdown document containing the source code, analysis, and visualizations.
+- `Spanish-Suicide-EDA.pdf`: The compiled report containing the results of the analysis.
 - `data/`: Directory containing the raw `.csv` datasets obtained from INE.
 - `mybibfile.bib`: Bibliography file for references used in the analysis.
 
