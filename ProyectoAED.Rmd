@@ -1,0 +1,930 @@
+---
+title: "Análisis de los Suicidios Registrados en España en el Periodo 2014-2023"
+author:
+  - name: "Fabián Calvo Castillo"
+    allfil: "1"
+  - name: "Mario Martínez Guillen"
+    allfil: "1"
+  - name: "Axel Valton Juan"
+    allfil: "1"
+
+affiliation:
+  - num: 1
+    address: |
+      Máster Universitario en Ciencia de Datos -
+      Universitat de València -
+      ETSE 
+    email: 
+      - "facalcas@alumni.uv.es, "
+      - "avaljuan@alumni.uv.es"
+      - "marguim5@alumni.uv.es"
+
+authorcitation: |
+  Calvo, F.; Martínez, M.; Valton, A.
+
+correspondence: |
+  marcelino.martinez@uv.es;
+
+journal: notspecified
+type: article
+status: submit
+
+simplesummary: |
+  Proyecto Análisis Exploratorio de los Datos.
+
+abstract: |
+  Este estudio realiza un análisis exploratorio de los datos oficiales del Instituto Nacional de Estadística (INE) sobre los suicidios en España entre 2014 y 2023. Las bases de datos incluyen información desglosada por sexo, grupo de edad, mes, nacionalidad y comunidad autónoma, así como datos poblacionales. Tras la importación y limpieza de los datos, se llevaron a cabo tareas de visualización con el objetivo de identificar patrones o posibles factores asociados a la variación en las tasas de suicidio. Finalmente, se desarrolló un análisis para determinar la relación entre el número de suicidios y los factores disponibles. Los resultados aportan una visión global sobre la evolución reciente del fenómeno, proporcionando una base para estudios posteriores.
+
+
+keywords: |
+  Suicidios; Mortalidad por Suicidio; España; Estadísticas de Mortalidad; Salud Pública; Análisis Exploratorio de Datos; Visualización de Datos 
+  
+
+acknowledgement: |
+  
+authorcontributions: |
+  
+funding: |
+  
+
+institutionalreview: |
+  
+
+informedconsent: |
+  
+
+dataavailability: |
+  Los datos analizados en este estudio están disponibles públicamente y fueron 
+  obtenidos del Instituto Nacional de Estadística (INE).
+  https://ine.es/dyngs/INEbase/operacion.htm?c=Estadistica_C&cid=1254736176780&menu=resultados&idp=1254735573175#_tabs-1254736194710
+
+conflictsofinterest: |
+  
+
+supplementary: |
+ 
+bibliography: mybibfile.bib
+endnotes: false
+
+output: 
+  rticles::mdpi_article:
+    extra_dependencies: longtable
+---
+
+
+# Introducción
+
+El suicidio representa un grave problema de salud pública en España y el mundo, cuya comprensión es esencial para desarrollar estrategias de prevención efectivas. Este estudio realiza un análisis exploratorio de los datos registrados de la mortalidad por suicidio en España entre 2014 y 2023, con el objetivo de identificar patrones, tendencias, disparidades demográficas, geográficas y etarias a partir de los datos del INE. El análisis se estructura en torno a tres conjuntos de datos diferenciados: distribución anual por comunidad autónoma, sexo y edad, distribución mensual de los casos en los años estudiados y la distribución de los casos por nacionalidad.
+A través de la exploración y visualización de dichas variables, se busca describir la magnitud de la problemática que se enfrenta, e identificar posibles relaciones entre las variables analizadas.
+
+# Método
+
+## Preparación y Adquisición de los Datos
+
+El análisis se fundamenta en los datos de mortalidad por suicidio en España para el periodo de 2014 a 2023, proporcionados por el INE.
+El punto de partida consistió en múltiples archivos .csv (uno para cada año de estudio), los cuales presentaban un formato estructurado, pero con trabajo por hacer en cuanto al formato de columnas y su distinción por año.
+
+```{r, include=FALSE}
+pacman::p_load(tidyverse,lubridate,dplyr,stringr,readr,purrr,
+               ggplot2,mapSpain,sf,scales,readxl,knitr)
+```
+El primer paso fue verificar la codificación de los conjuntos de datos, con el resultado que los conjuntos de Nacionalidad y Sexo y el conjunto de Comunidad Autónoma, Sexo y Edad comparten codificación, siendo esta la `ISO-8859-1`. Mientras que el conjunto de datos de Mes, Sexo y Edad presenta una codificación de `UTF-8`.
+
+```{r Codificacion ns, include=FALSE}
+guess_encoding("data/2014ns.csv")
+```
+
+```{r Codificacion CSE, include=FALSE}
+guess_encoding("data/2014_CSE.csv")
+```
+
+```{r Codificación MSE, include=FALSE}
+guess_encoding("data/2014_MSE.csv")
+```
+
+Por esta razón, la importación de los conjuntos de datos se realiza en la codificación respectiva, y el análisis y graficación de los datos parte de la codificación asignada.
+
+```{r MSE a Tidy, include=FALSE}
+MSE <- data.frame(
+  "Mes de defunción" = character(),
+  Sexo = character(),
+  Edad = character(),
+  Total = numeric(),
+  stringsAsFactors = FALSE
+)
+
+colnames(MSE)[1] <- "Mes de defunción"
+
+cargar_y_añadir_MSE <- function(MSE, archivo){
+  MSE_año <- read_delim(paste0("data/",archivo), 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE, locale = locale(grouping_mark = ".",encoding="UTF-8"))
+  MSE_año$Año <- gsub(pattern = "_[^1-9]*","", x = archivo)
+  MSE <- rbind(MSE,MSE_año)
+  return(MSE)
+}
+
+lista_archivos <- grep(x = list.files("data"), pattern="[1-9]*_MSE.*", value= TRUE)
+for (archivo in lista_archivos){
+  MSE <- cargar_y_añadir_MSE(MSE, archivo)
+}
+
+MSE[colnames(MSE)!="Total"] <- as.data.frame(lapply(MSE[colnames(MSE)!="Total"],as.factor))
+
+colnames(MSE)[colnames(MSE)=="Total"] <- "Total_suicidios"
+
+MSE <- MSE %>% 
+  select(Año,"Mes de defunción", Sexo, Edad, Total_suicidios)
+
+orden_meses <- c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+                 "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+
+MSE_sin_totales <- MSE %>%
+  filter(`Mes de defunción`!="Todos los meses",
+         Sexo!="Ambos sexos",
+         Edad!="Todas las edades") %>%
+  mutate(`Mes de defunción` = factor(`Mes de defunción`, levels = orden_meses),
+          Sexo=factor(Sexo,levels = c("Hombres","Mujeres")))
+
+```
+
+```{r CSE a Tidy, include=FALSE}
+archivos<-list.files("data")
+
+archivos<-grep("CSE\\.csv$", archivos, value = TRUE)
+
+CSE_tidy<-data.frame()
+
+for (CSE in archivos){
+  ruta <- paste0("data/",CSE)
+  encoding<-guess_encoding(ruta)[[1]][1]
+  
+  df <- read_delim(ruta, delim = ";", 
+                   escape_double = FALSE, col_types = cols(Sexo = col_character(),Total=col_number()), 
+                   locale = locale(encoding = encoding,grouping_mark=".",decimal_mark = ","), 
+                   trim_ws = TRUE)
+  
+  names(df)[2]<-"Territorio"
+  
+  df<-df %>%
+    filter(Nacional!="Extranjero")
+  
+  df<-df[-1]
+  
+  df <- df %>% replace_na(list(Territorio = "Nacional"))
+  
+  año_texto<- sub("_.*", "", CSE)
+  
+  año<-factor(año_texto, levels = 2014:2023)
+  
+  df <- df %>%
+    mutate(Año = año)
+  
+  df <- df %>%
+    mutate(
+      Territorio = Territorio %>%
+        str_squish() %>%
+        str_remove("^\\d+\\s+") %>%
+        str_remove(",.*$") %>%
+        str_replace("Balears", "Baleares")
+  )
+
+  df <- df %>%
+    mutate(
+      Edad = Edad %>%
+        str_replace("Todas.*", "Todas") %>%
+        str_replace("años", "") %>%
+        str_replace("De ", "") %>%
+        str_replace("Menores de ", "<") %>%
+        str_replace(" y más", "+") %>%
+        str_replace(" a ", "-")
+  )
+
+  df <- df %>%
+    mutate(
+      Sexo = Sexo %>%
+        str_replace("Ambos.*", "Ambos")
+  )
+  
+  df <- df %>%
+    filter(
+      Territorio != "Nacional",
+      Sexo != "Ambos",
+      Edad != "Todas"
+    )
+
+  df <- df %>%
+    mutate(across(where(is.character), as.factor))
+
+  CSE_tidy <- CSE_tidy %>% rbind(df)
+
+CSE_tidy <- CSE_tidy %>% 
+  select(Año,Territorio, Sexo, Edad, Total)
+
+ }
+```
+
+```{r ns a Tidy, include=FALSE}
+procesar_archivo_ns <- function(archivo_ns) {
+  patron_ns <- "(\\d+)ns\\.csv"
+  matches_ns <- str_match(archivo_ns, patron_ns)
+  año_extraido_ns <- as.numeric(matches_ns[1, 2])
+
+  datos_ns_limpios <- read_delim(
+    archivo_ns,
+    delim = ";",
+    escape_double = FALSE,
+    trim_ws = TRUE,
+    locale = locale(encoding = "ISO-8859-1", decimal_mark = ","),
+    col_types = cols(
+      Edad = col_character(),
+      Nacionalidad = col_character(),
+      Sexo = col_character(),
+      Total = col_number()
+      ),
+    show_col_types = FALSE
+    ) %>%
+    
+    filter(Edad == "Todas las edades") %>%
+    filter(Nacionalidad != "Total" & Sexo != "Ambos sexos") %>%
+    select(Nacionalidad, Sexo, Total) %>%
+    mutate(
+      Año = factor(año_extraido_ns,levels = 2014:2023),
+      Nacionalidad = factor(Nacionalidad, levels = c("Española", "Extranjera", "No consta")),
+      Sexo = factor(Sexo, levels = c("Hombres", "Mujeres"))
+      ) %>%
+    select(Año, Nacionalidad, Sexo, Total)
+  return(datos_ns_limpios)
+}
+
+lista_archivos_ns <- list.files(
+  path = "data/",
+  pattern = "\\d+ns\\.csv$",
+  full.names = TRUE
+)
+
+datos_ns_tidy <- map_dfr(lista_archivos_ns, procesar_archivo_ns)
+```
+
+Se destacan tareas de transformación y limpieza en los conjuntos de datos, como la creación de una variable `Año` para cada uno de los conjuntos, debido a su ausencia en los ficheros originales proporcionados por el INE. Mediante el uso de expresiones regulares se extrae el año (proveniente del nombre del fichero .csv) y se crea esta variable. Asimismo, se ajustó la codificación de cada conjunto de datos y los tipos de datos numéricos y categóricos para las respectivas variables de los conjuntos.
+Una vez los ficheros se han tratado, se procede a su concatenación para la creación de los tres respectivos dataframes que serán utilizados para el análisis en el proyecto.
+
+```{r import poblacion nacionalidad 1, include=FALSE}
+poblacion_NS <- read_excel("data/poblacion_ASN.xlsx", skip=6, n_max = 9)
+```
+
+```{r importacion poblacion nacionalidad 2, include=FALSE}
+df_tidy_poblacion_NS <- poblacion_NS %>%
+  rename(cat = 1) %>%
+  
+  mutate(
+    Nacionalidad = if_else(cat %in% c("Española", "Extranjera"), cat, NA_character_),
+    edad         = if_else(cat == "Todas las edades", cat, NA_character_),
+    Sexo         = if_else(cat %in% c("Hombres", "Mujeres"), cat, NA_character_)
+  ) %>%
+  
+  fill(Nacionalidad, edad, Sexo) %>%
+  
+  filter(!(cat %in% c("Española", "Extranjera", "Todas las edades"))) %>%
+  
+  pivot_longer(
+    cols = -c(cat, Nacionalidad, edad, Sexo),
+    names_to = "fecha",
+    values_to = "Poblacion"
+  ) %>%
+  mutate(
+    Año = as.factor(str_extract(fecha, "\\d{4}") |> as.integer())) %>% 
+  mutate(Nacionalidad = as.factor(Nacionalidad)) %>% 
+  mutate(Sexo= as.factor(Sexo)) %>%
+  select(Año,Nacionalidad,Sexo,  Poblacion)
+```
+
+```{r, include=FALSE}
+df_tidy_poblacion_NS_1 <- datos_ns_tidy %>% filter(Nacionalidad!="No consta") %>% inner_join(df_tidy_poblacion_NS,by=c("Año","Nacionalidad","Sexo"))
+
+df_tidy_poblacion_NS_1 <- df_tidy_poblacion_NS_1 %>%
+  group_by(Año, Nacionalidad) %>%
+  summarise(
+    Suicidios_total = sum(Total, na.rm = TRUE),
+    Poblacion_total = sum(Poblacion, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(Tasa_suicidios=Suicidios_total/Poblacion_total)%>%
+  mutate(Tasa_suicidios_100k = (Suicidios_total / Poblacion_total)*100000)
+
+```
+
+
+
+Los datos de mortalidad por suicidio almacenados en estos dataframes son absolutos, y pueden no tener una interpretación correcta si se comparan grupos de distinto tamaño. Es por ello que también se han importado datos de población en España durante el periodo de análisis, esto con el fin de contar con las herramientas para responder a preguntas donde la proporcionalidad del tamaño de los grupos que se analizan es fundamental para entender los resultados. En específico, se importan dos datasets, uno con el desglose de poblaciones por comunidades autónomas en el periodo de estudio, y otro con el desglose por Nacionalidad y Sexo.
+Estos datasets se han obtenido en archivos tipo Excel, descargados desde la página del INE, que no presentaban un formato `tidy`, por lo que se les realizan las transformaciones respectivas para que adopten un formato adecuado para la futura graficación de resultados. De esta forma, cuando sea necesario se puede disponer de un dato relativo al tamaño del grupo, tratándose de la tasa de suicidios.
+
+```{r datasets poblaciones, include=FALSE}
+poblacion_comunidades_1 <- read_excel("data/poblacion_CA_1.xlsx",skip=6, n_max=20)
+poblacion_comunidades_2 <- read_excel("data/poblacion_CA_2.xlsx", skip=6,n_max=20)
+convertir_pob_con_tidy <- function(poblacion_comunidades){
+poblacion_comunidades <-poblacion_comunidades  %>%
+  mutate(fila = row_number()) %>% 
+  pivot_longer(
+    cols = -c(1,fila),
+    names_to = "Sexo",
+    values_to = "valor_bruto"
+  ) %>%
+  group_by(Sexo) %>%
+  mutate(
+    Año = valor_bruto[fila == 1],
+    Poblacion = if_else(fila == 1, NA, valor_bruto)
+  ) %>%
+  ungroup() %>%
+  filter(fila != 1) %>%
+  select(Año, Sexo, Comunidad = 1, Poblacion) %>% 
+  mutate(Sexo=ifelse(str_detect(Sexo, pattern="(Hombres)|(Mujeres)"),Sexo,NA)) %>% 
+  fill(Sexo,.direction = "down") %>% 
+  mutate(Comunidad=gsub(pattern="[0-9]+.",replacement = "",Comunidad)) %>% 
+  mutate(across(-Poblacion,as.factor)) %>% 
+  mutate(Poblacion=as.numeric(Poblacion)) %>% 
+  rename(Territorio=Comunidad) %>% 
+  mutate(Territorio = recode(
+    Territorio,
+    "Balears, Illes" = "Baleares",
+    "Asturias, Principado de" = "Asturias",
+    "Rioja, La" = "Rioja",
+    "Madrid, Comunidad de" = "Madrid",
+    "Navarra, Comunidad Foral de" = "Navarra",
+    "Murcia, Región de" = "Murcia"
+  ))
+return(poblacion_comunidades)
+}
+
+poblacion_comunidades_1<-convertir_pob_con_tidy(poblacion_comunidades_1)
+poblacion_comunidades_2 <- convertir_pob_con_tidy(poblacion_comunidades_2)
+
+poblacion_comunidades <- rbind(poblacion_comunidades_1,poblacion_comunidades_2)
+```
+
+```{r Comunidades-Sexo con poblacion, echo=FALSE}
+CSE_tidy_con_poblacion <- CSE_tidy %>%
+  group_by(Año, Sexo, Territorio) %>%
+  summarise(
+    Total = sum(Total, na.rm = TRUE),
+    .groups = "drop"
+  ) %>% 
+  inner_join(poblacion_comunidades,by=c("Año","Sexo","Territorio"))
+```
+
+```{r Edades población, include=FALSE}
+CSE_poblacion_sexo <- CSE_tidy_con_poblacion %>% 
+  group_by(Año,Sexo) %>% 
+  summarise(
+    Total=sum(Total, na.rm=TRUE),
+    Poblacion=sum(Poblacion, na.rm=TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r Suicidios Población, include=FALSE}
+CSE_solo_comunidades <- CSE_tidy_con_poblacion %>% 
+  group_by(Año, Territorio) %>% 
+  summarise(
+    Total=sum(Total, na.rm=TRUE),
+    Poblacion=sum(Poblacion, na.tm=TRUE),
+    .groups = "drop"
+  ) 
+```
+
+```{r, include=FALSE}
+reglasigma <- function(x){
+  rango_1 <- mean(x,na.rm=TRUE) -3*sd(x, na.rm=TRUE)
+  rango_2 <- mean(x,na.rm=TRUE) +3*sd(x, na.rm=TRUE)
+  outliers <- ifelse(is.na(x),NA,ifelse((x < rango_1) | (x > rango_2), TRUE, FALSE))
+  return(outliers)
+}
+
+reglaboxplot <- function(x) {
+  iqr <- IQR(x, na.rm = TRUE)
+  q1 <- as.numeric(quantile(x, probs = 0.25, na.rm = TRUE))
+  q3 <- as.numeric(quantile(x, probs = 0.75, na.rm = TRUE))
+  outliers <- ifelse(is.na(x), NA, (x < q1 - 1.5 * iqr) | (x > q3 + 1.5 * iqr))
+  return(outliers)
+}
+```
+
+
+## Inspección de los Datos
+
+Con los datos consolidados, se realizó una inspección inicial de las variables disponibles. El dataframe que cuenta con la información de nacionalidad y sexo, se compone de 4 variables siendo estas `Año`, `Nacionalidad`, `Sexo` y `Total`. 
+
+```{r Estructura ns, include=FALSE}
+glimpse(datos_ns_tidy,width = 70)
+```
+
+La variable `Año` es un factor con niveles de 2014 a 2023, mientras que `Sexo` incluye los niveles "Hombres" y "Mujeres". Por su parte la variable `Nacionalidad` presenta tres niveles siendo estos: "Española", "Extranjera" y "No consta". Siendo el nivel `No consta` casos en los que no fue posible determinar la nacionalidad de la persona.
+Como parte de las decisiones tomadas con este conjunto, se analiza la proporción que esta categoría `No consta` presenta en los datos, con los siguientes resultados.
+
+```{r, include=FALSE}
+suicidios_barras_nacionalidad<-datos_ns_tidy%>%
+  group_by(Nacionalidad)%>%
+  summarise(Total_Suicidios=sum(Total),.groups="drop")%>%
+  mutate(Porcentaje=Total_Suicidios/sum(Total_Suicidios),
+         Etiqueta_Porcentaje=scales::percent(Porcentaje,accuracy=0.01))
+```
+
+```{r, echo=FALSE, out.width="85%"}
+gr_barras_nacionalidad <- ggplot(suicidios_barras_nacionalidad,
+                                 aes(x = reorder(Nacionalidad, -Total_Suicidios),
+                                     y = Total_Suicidios,
+                                     fill = Nacionalidad)) +
+  geom_col() +
+  geom_text(
+    aes(label = Etiqueta_Porcentaje),
+    vjust = -0.5,
+    color = "black",
+    size = 4
+  ) +
+  labs(
+    title = "Proporción de Suicidios por Nacionalidad",
+    fill = "Nacionalidad",
+    x = "Nacionalidad",
+    y = "Número Total de Suicidios"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    legend.position = "none" 
+  )
+
+print(gr_barras_nacionalidad)
+
+```
+
+Como se observa en el gráfico, la categoría `No consta` representa una proporción insignificante de los casos con apenas un 0.02%, por lo que se excluye del análisis segmentado por `Nacionalidad` que se realizará.
+En cuanto a la variable `Total`, esta contiene 60 registros que reflejan el número anual de suicidios, desglosado según la nacionalidad de las personas.
+A continuación se presenta un resumen de los datos presentes en esta variable, desglosada como hemos dicho por `Año`, `Nacionalidad` y `Sexo`.
+
+```{r, echo=FALSE,message=FALSE,warning=FALSE}
+datos_ns_tidy%>%
+  filter(Nacionalidad!="No consta")%>%
+  summarise(
+    Mínimo=min(Total),
+    Q1 = quantile(Total, 0.25, na.rm = TRUE),
+    Mediana = median(Total, na.rm = TRUE),
+    Media = mean(Total, na.rm = TRUE),
+    Q3 = quantile(Total, 0.75, na.rm = TRUE),
+    Maximo = max(Total, na.rm = TRUE),
+    Valores_NA = sum(is.na(Total))
+  ) %>%
+  kable(digits = 2)
+```
+
+Como para nuestro análisis posterior precisaremos de la tasa de suicidios por nacionalidad (agrupando el sexo y dividiendo entre la población por nacionalidad), inspeccionamos si se presentan outliers. Usaremos la regla boxplot para esta detección.
+
+```{r, echo=FALSE}
+ df_tidy_poblacion_NS_1 %>%
+   summarise(
+     `Outliers Tasa Suicidios por Nacionalidad` = sum(reglaboxplot(Tasa_suicidios_100k))
+   )%>%
+   kable(digits = 2)
+```
+
+
+Como podemos observar no hay outliers.
+
+
+El conjunto de datos que presentan los datos de suicidio separados por Mes, Sexo y Edad se compone de cinco variables siendo estas: `Año`, `Mes de defunción`, `Sexo`, `Edad` y `Total suicidios`.  
+
+```{r Estructura MSE, include=FALSE}
+glimpse(MSE_sin_totales,width = 70)
+```
+
+Para las variables `Mes de defunción`, `Sexo` y `Edad` se hizo la limpieza de categorías no necesarias como "Todos los meses", "Ambos sexos" y "Todas las edades"; esto para que en la visualización no se agregue ruido innecesario debido a que se tiene la capacidad de presentar esta información mediante agrupamientos de los datos. Por último, se presentan los datos de la variable `Total suicidios`.
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+MSE_sin_totales%>%
+  summarise(
+    Mínimo=min(Total_suicidios,na.rm = TRUE),
+    Q1 = quantile(Total_suicidios, 0.25, na.rm = TRUE),
+    Mediana = median(Total_suicidios, na.rm = TRUE),
+    Media = mean(Total_suicidios, na.rm = TRUE),
+    Q3 = quantile(Total_suicidios, 0.75, na.rm = TRUE),
+    Maximo = max(Total_suicidios, na.rm = TRUE),
+    Valores_NA = sum(is.na(Total_suicidios))
+  )%>%
+  kable(digits = 2)
+```
+
+Como se observa, existen meses sin suicidios registrados, y el máximo registrado en un mes es de 45 personas (ocurrido en agosto de 2020). Finalmente se muestra que la media de suicidios es de 10.63. Se destaca que este conjunto no presenta valores `NA`.
+
+
+Finalmente, el conjunto de datos con datos separados por comunidad autonóma presenta las variables `Año`, `Territorio`, `Sexo`, `Edad` y `Total`.
+
+```{r Estructura CSE, include=FALSE}
+glimpse(CSE_tidy,width = 70)
+```
+
+Las variables `Año` se define con un factor con el correspondiente periodo de estudio del proyecto, la variable `Territorio` incluye 19 niveles que representan las comunidades y ciudades autónomas españolas, De forma coherente con los otros datasets, las variables `Sexo` y `Edad` también se establecen como factores según los niveles analizados.
+Finalmente la variable `Total` muestra el número de suicidios presentados en bajo las condiciones anteriormente explicadas, con los siguientes resultados. 
+```{r, include=FALSE}
+CSE_tidy%>%
+  summarise(
+    Mínimo=min(Total,na.rm = TRUE),
+    Q1 = quantile(Total, 0.25, na.rm = TRUE),
+    Mediana = median(Total, na.rm = TRUE),
+    Media = mean(Total, na.rm = TRUE),
+    Q3 = quantile(Total, 0.75, na.rm = TRUE),
+    Maximo = max(Total, na.rm = TRUE),
+    Valores_NA = sum(is.na(Total))
+  ) %>%
+  kable(digits = 2)
+```
+
+Como más adelante precisaremos también de las tasas de suicidio agrupadas por comunidad autónoma, hacemos un análisis de sus outliers con la regla boxplot.
+
+```{r, include=FALSE}
+CSE_con_tasas <- CSE_solo_comunidades %>% 
+   mutate(Tasa_Suicidios=Total/Poblacion)
+
+CSE_con_tasas %>% 
+   ggplot(aes(x=Tasa_Suicidios))+
+   geom_histogram()
+```
+
+```{r, echo=FALSE}
+CSE_con_tasas %>%
+   summarise(
+     `Outliers Tasa Suicidios por Comunidad autónoma` = sum(reglaboxplot(Tasa_Suicidios))
+   )%>%
+   kable(digits = 2)
+```
+```{r, include=FALSE}
+CSE_con_tasas[reglaboxplot(CSE_con_tasas$Tasa_Suicidios),]
+CSE_con_tasas %>% arrange(desc(Tasa_Suicidios))
+```
+Tras analizar dichos outliers, hemos visto que se correponde a tasas de suicidios superiores a 12 personas o inferiores a 3 personas por cada 100000 habitantes, no siendo valores demasiado extremos respecto del resto de tasas. Por tanto, las mantendremos para nuestro análisis posterior.
+
+
+# Resultados
+
+Una de las primeras preguntas del análisis, es la evolución del número de suicidios en España a lo largo del tiempo. Examinar esta tendencia permite identificar patrones y posibles efectos de acontecimientos específicos en la variación del número de casos registrados.
+Dado el interés por el comportamiento reciente de los datos, se destaca la pandemia del COVID-19 como un posible factor asociado al aumento de casos que se han registrado, señalándose este hecho con una línea en el gráfico, se ilustra esta evolución con el siguiente gráfico. 
+
+```{r grafico lineas 2020, echo=FALSE, message=FALSE, warning=FALSE, out.width="90%"}
+MSE_evolucion <-MSE %>% 
+  filter(`Mes de defunción`=="Todos los meses",
+         Sexo=="Ambos sexos",
+         Edad=="Todas las edades")
+
+MSE_evolucion %>% 
+  ggplot(aes(x=Año, y=Total_suicidios)) +
+  geom_point() +
+  labs(title = "Evolución del Total de Suicidios en España (2014-2023)",
+       y = "Número de Suicidios",
+       x = "Año") +
+  geom_line(group=1) + 
+  geom_vline(xintercept = "2020", linetype = "dashed", color = "red") +
+  annotate("text",
+           x="2020",
+           y=4100,
+           label="Pandemia COVID-19",
+           color="red",
+           size=3.5,
+           hjust=1.1,
+           vjust=0)+
+  theme_minimal()
+```
+
+Se visualiza un aumento notable en el número de suicidios en España, concentrado principalmente en los últimos años del periodo analizado. Se distinguen dos fases: una etapa prepandémica (2014-2018) con una tendencia variable y el mínimo en el 2018, y una etapa posterior (a partir de 2019) caracterizada por un incremento pronunciado en el número de suicidios que culmina en 2022, año en el que se registró el máximo de suicidios. En 2023 se muestra un leve descenso respecto al año anterior, aunque con cifras superiores a las del periodo prepandémico. Estos hallazgos sugieren un posible impacto de la pandemia y sus consecuencias sociosanitarias en la mortalidad por suicidio en España.
+
+Como continuación del análisis del periodo 2014-2023, se examina la posible estacionalidad en la ocurrencia de los suicidios. Para ello, los casos se agrupan según el mes en el que tuvieron lugar, y se estudia para todos los años. El siguiente gráfico muestra un conjunto de boxplots que resumen la distribución mensual, mostrando la mediana, la variabilidad y la posible presencia de valores extremos en determinados meses.
+
+```{r box por meses MSE, echo=FALSE, message=FALSE, warning=FALSE,out.width="90%"}
+box_meses<-MSE_sin_totales%>%
+  group_by(`Mes de defunción`,Año)%>%
+  summarise(Total_sum=sum(Total_suicidios))%>%
+  ggplot(aes(x=`Mes de defunción`, y=Total_sum))+ geom_boxplot()+
+  labs(title="Distribución del total de suicidios por meses", x="Mes de Defunción",y="Total de Suicidios")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(box_meses)
+```
+
+A partir de este gráfico, se puede refutar una posible idea de que los suicidios ocurren aleatoriamente durante el año, debido a que se observa un patrón estacional.
+Contrario a la expectativa de mayor incidencia en invierno, los datos muestran que los meses de mayor frecuencia de suicidio se presentan en los meses de verano. Las medianas más altas se sitúan entre mayo y agosto, y progresivamente se presenta una disminución con el paso del tiempo. Además, las cajas más compactas en invierno (diciembre y febrero en particular) indican no solo una incidencia menor, sino también una variabilidad baja en estos meses a lo largo de los años.  
+
+```{r, include=FALSE}
+MSE_sin_totales%>%
+  group_by(`Mes de defunción`,Año)%>%
+  filter(`Mes de defunción`=="diciembre")%>%
+  summarise(total=sum(Total_suicidios))%>%
+  arrange(desc(total))
+```
+
+Se destaca el mes de diciembre por presentar dos valores atípicos: el valor extremo superior corresponde a diciembre de 2021 (durante la pandemia) con 349 suicidios, mientras que el valor extremo inferior corresponde a 2017 (año prepandémico), con 241 casos registrados.
+
+Es relevante analizar los datos de suicidios por sexo, para identificar posibles diferencias en su comportamiento y derivar a conclusiones específicas de esta problemática. El siguiente gráfico presenta la evolución anual del número de suicidios desglosado por sexo.
+```{r suicidios por sexo, include=FALSE}
+evo_sexo<-MSE_sin_totales%>%
+  group_by(Año,Sexo)%>%
+  summarise(Total_Anual=sum(Total_suicidios),.groups = "drop")
+```
+
+```{r evolucion por sexo, echo=FALSE, out.width="90%"}
+gra_anual_sexo<-ggplot(evo_sexo,aes(x=Año,y=Total_Anual,fill = Sexo))+
+  geom_col(position = "dodge")+
+  scale_fill_manual(values = c("Hombres"="skyblue","Mujeres"="pink"))+
+  labs(
+    title = "Evolución del Total de Suicidios por Sexo (2014-2023)",
+    y="Total de Suicidios",
+    x="Año"
+  )+
+  theme_minimal()+
+  theme(legend.position = "bottom")
+print(gra_anual_sexo)
+```
+
+El gráfico evidencia una profunda brecha de género en la mortalidad por suicidio, con un número consistentemente mayor de casos en hombres que en mujeres a lo largo del periodo estudiado. También se observa que tanto en hombres como en mujeres, post pandemia, los registros de suicidios se incrementaron.
+
+Para respaldar esta observación, se realiza el análisis de estas variables para identificar que no es cuestión de aleatoriedad los resultados obtenidos, sino que realmente existe una relación entre el sexo y el número de suicidios. Se realiza la prueba no paramétrica de Wilcoxon, debido a que no se comparan grupos independientes, sino que se comparan datos pareados de hombres y mujeres para cada año, relativizados a la población total en españa dividida en estos 2 grupos.
+
+```{r test wilcox Hombre-Mujer, echo=FALSE}
+CSE_sexo_con_tasas <- CSE_poblacion_sexo %>% 
+  mutate(Tasa_suicidios_100k=(Total/Poblacion)*100000)
+
+total_hombres<-CSE_sexo_con_tasas%>%
+  filter(Sexo=="Hombres")%>%
+  pull(Tasa_suicidios_100k)
+
+total_mujeres<-CSE_sexo_con_tasas%>%
+  filter(Sexo=="Mujeres")%>%
+  pull(Tasa_suicidios_100k)
+
+hommuje_Wilcox<-wilcox.test(x=total_hombres,y = total_mujeres,
+                           paired = TRUE,
+                           alternative = "greater")
+print(hommuje_Wilcox)
+```
+
+
+Con el valor de `p` obtenido en esta prueba, se rechaza la hipótesis nula, que indica que no existe diferencia estadística entre el número de suicidios entre hombres y mujeres mediante el análisis de la mediana de las diferencias.
+Este análisis confirma que la diferencia observada no es causal, la disparidad entre la mortalidad por suicidio en España entre hombres y mujeres es un fenómeno estadísticamente significativo y de gran magnitud. Mediante este tipo de hallazgos, se destaca que las estrategias de prevención de estos sucesos se deben direccionar y adquirir un enfoque de género diferenciado. 
+ 
+Como continuación del análisis, se estudian los datos de suicidio registrados bajo la segmentación de `Nacionalidad`. El número de suicidios ocurridos en españoles es ampliamente superior a los extranjeros, pero este análisis es trivial y poco informativo debido a que la población española residente en España es mucho mayor que la extranjera.
+Para obtener información de estos datos, se analiza el número de suicidios ocurridos por cada cien mil habitantes, haciendo uso de los datos poblaciones de españoles y extranjeros registrados territorio español durante el 2014 al 2023. Obteniendo lo siguiente.
+
+```{r, echo=FALSE}
+df_tidy_poblacion_NS <- datos_ns_tidy %>% filter(Nacionalidad!="No consta") %>% inner_join(df_tidy_poblacion_NS,by=c("Año","Nacionalidad","Sexo"))
+
+df_tidy_poblacion_NS <- df_tidy_poblacion_NS %>%
+  group_by(Año, Nacionalidad) %>%
+  summarise(
+    Suicidios_total = sum(Total, na.rm = TRUE),
+    Poblacion_total = sum(Poblacion, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(Tasa_suicidios=Suicidios_total/Poblacion_total)%>%
+  mutate(Tasa_suicidios_100k = (Suicidios_total / Poblacion_total)*100000)
+```
+
+```{r grafico tasa suicidio por nacionalidad, echo=FALSE, out.width="90%"}
+ggplot(df_tidy_poblacion_NS, aes(x = Año, y = Tasa_suicidios_100k, color = Nacionalidad, group = Nacionalidad)) +
+  geom_line() +
+    labs(
+    title = "Evolución de Tasa de Suicidio por Nacionalidad",
+    subtitle = "Suicidios por cada 100.000 habitantes",
+    x = "Año",
+    y = "Tasa de Suicidio (por cada 100.000 hab.",
+    color = "Nacionalidad"
+  ) +
+  theme_minimal()+
+  theme(legend.position = "bottom")
+```
+
+Este gráfico contradice el análisis si toma únicamente el número absoluto de suicidios registrados, evidenciando una mayor paridad en las tasas de suicidio por cada 100.000 habitantes entre españoles y extranjeros.
+Se evidencia que la población española tenía una tasa de suicidio superior a la extranjera al inicio del periodo de estudio (2014 a 2016), sin embargo la tasa en extranjeros fue incrementando con el tiempo, alcanzando un pico en 2019 y sobrepasando a la tasa española.
+La tasa de suicidio en españoles presentó un comportamiento general más suave, con incrementos tras la pandemia, mientras que la extranjera presentó picos y valles más pronunciados.
+Se concluye con este gráfico que la población extranjera está lejos de ser un grupo de bajo riesgo ante la problemática de los suicidios, con una alta volatilidad, y que su pico máximo se alcanzara en 2019 (pre-pandemia) rompe con la narrativa de un impacto pandémico unificado para todos los grupos, y sugiere que existen otros factores que afectaron a esta población antes de la crisis sanitaria.
+
+Aún con la mayor paridad observada, si realizamos en test de Wilcoxon con las tasas calculadas diferenciadas por grupos observamos que existen diferencias significativas entre las medianas de ambos grupos debido al bajo p-valor, luego la nacionalidad también es influyente en los suicidios.
+
+```{r, echo=FALSE}
+total_españoles <- df_tidy_poblacion_NS %>% 
+  filter(Nacionalidad=="Española") %>% 
+  pull(Tasa_suicidios_100k)
+
+total_extranjeros<- df_tidy_poblacion_NS %>% 
+  filter(Nacionalidad=="Extranjera") %>% 
+  pull(Tasa_suicidios_100k)
+
+
+
+espext_Wilcox<-wilcox.test(x=total_españoles,y = total_extranjeros,
+                           paired = TRUE,
+                           alternative = "greater")
+print(espext_Wilcox)
+```
+
+Con los resultados de los análisis anteriores se han supuesto conclusiones como el aumento en el número de suicidios post pandemia, también que la gran mayoría de estos suicidios se presentan en hombres y que la población extranjera en España presenta variaciones a lo largo del tiempo en la tasa de suicidio por cada cien mil habitantes.
+Sin embargo no se considera si existen grupos etarios que presentan mayor frecuencia en el número de suicidios. Mediante el siguiente mapa de calor facetado, se visualiza si existen rangos de edad con una mayor incidencia y si los resultados entre hombres y mujeres se asemejan.
+
+```{r heatmap edades, echo=FALSE, out.width="90%"}
+niveles_edad <- c("<15 ", "15-29 ", "30-39 ", "40-44 ", "45-49 ", 
+                  "50-54 ", "55-59 ", "60-64 ", "65-69 ", "70-74 ", 
+                  "75-79 ", "80-84 ", "85-89 ", "90-94 ", "95 +")
+CSE_agg<-CSE_tidy%>%
+  group_by(Año,Sexo,Edad)%>%
+  summarise(Total_Esp=sum(Total,na.rm = T),.groups = "drop")
+
+heatmp_edades<-ggplot(CSE_agg,
+                      aes(x=Año,
+                          y=factor(Edad,levels = niveles_edad),
+                          fill = Total_Esp))+
+  geom_tile(color="white",linewidth = 0.1)+
+  facet_wrap(~Sexo)+
+  scale_fill_gradient(low="lightblue",high="#b30000")+
+  labs(title="Evolución Anual del Suicidio por Edad y Sexo",
+       x="Año",
+       y="Rango de Edad",
+       fill="Total Anual")+
+  theme_minimal()+
+  theme(
+    axis.text.x = element_text(angle=45,hjust = 1),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  )
+print(heatmp_edades)
+```
+
+La primera observación que se rescata de este gráfico, es la drástica diferencia entre los dos paneles, siendo el de los hombres el que presenta una mayor incidencia (con más rojos, y más intensos) mientras que el de las mujeres presenta valores mucho menores.
+También se identifica que la incidencia de los suicidios no se distribuye uniformente, destacando "puntos calientes" en la mediana edad. Esto se visualiza ya que a partir de los 30 años hasta los 50, es donde se pinta una mayor incidencia de suicidios, principalmente en hombres. Aunque este patrón también ocurre en mujeres pero con una menor magnitud.
+Visualizando el gráfico de izquierda a derecha, se vuelve a encontrar el impacto del COVID-19 en la incidencia de suicidios, ya que se visualizan los puntos de mayor intensidad, en ambos paneles, al lado derecho tras el 2020.
+
+Con este mapa de calor se sintetiza, que la narrativa de suicidio en España durante el periodo de 2014 a 2023 se define principalmente en hombres de la mediana edad, y que el impacto de la pandemia no creó un problema nuevo, sino que intensificó el riesgo en estos grupos.  
+
+
+Una pregunta natural que surge con los datos es ¿cómo se distribuyen los suicidios a lo largo de las distintas comunidades autónomas en España?
+
+Para visualizarlo, se presentan unos gráficos en forma de mapa donde cuanto más intenso es el tono de gris, mayor cantidad de suicidios hay en dicha comunidad autónoma.
+
+```{r mapas de suicidios por CA, echo=FALSE, out.width="90%"}
+ccaa <- esp_get_ccaa(year = "2021") %>% st_as_sf()
+
+ccaa <- ccaa %>%
+  mutate(
+    Territorio = ine.ccaa.name %>%
+      str_squish() %>%
+      str_remove("^\\d+\\s+") %>%
+      str_remove(",.*$") %>%
+      str_replace("Illes Balears", "Baleares") %>%
+      str_replace("Catalunya", "Cataluña") %>%
+      str_replace("Comunidad Valenciana", "Comunitat Valenciana") %>%
+      str_replace("La Rioja", "Rioja") %>%
+      str_replace("Comunidad de Madrid", "Madrid")
+  ) %>%
+  select(Territorio, geometry)
+
+CSE_map_totals<-CSE_tidy %>%
+  group_by(Año,Territorio)%>%
+  summarise(Total_Absoluto=sum(Total),.groups = "drop")
+
+CSE_map_F_totals<-ccaa%>%
+  left_join(CSE_map_totals,by = "Territorio")
+
+mapas_totals<-CSE_map_F_totals%>%
+  filter(!is.na(Año)) %>%
+  ggplot()+
+  geom_sf(aes(fill=Total_Absoluto),color="white",linewidth=0.1)+
+  facet_wrap(~Año,ncol=5)+
+  scale_fill_gradient(
+    low="white",
+    high = "black",
+    trans="sqrt",
+    na.value="grey95",
+    name="Total"
+  )+
+  theme_void()+
+  labs(
+    title = "Total de Suicidios por Comunidad Autónoma 2014-2023"
+  )+
+  theme(
+    plot.title.position = "plot",
+    legend.position = "right"
+  )
+print(mapas_totals)
+```
+
+
+Como se desprende de los mapas, el patrón de total de suicidios es relativamente estable a lo largo de todos los años.
+
+Andalucía aparece de forma constante como la comunidad con las cifras más altas, mientras que regiones como Cataluña, Comunidad Valenciana y Madrid muestran valores intermedios. Por otro lado, comunidades con poblaciones más pequeñas como La Rioja, Cantabria o Navarra mantienen tonos significativamente menores.
+
+Este resultado parece lógico, ya que comunidades autónomas con mayor población tienen mayor número de suicidios. Es por ello que para hacer una comparación entre las comunidades autónomas, se necesita representar una tasa de suicidios que tenga en cuenta la población.
+
+En los siguientes gráficos se representan las tasas de suicidios por cada 100000 habitantes en cada comunidad autónoma, habiendo extraído los datos de población del dataset comentado al principio del documento.
+
+```{r mapas suicidio por CA cada 100k, echo=FALSE, out.width="90%"}
+ccaa <- esp_get_ccaa(year = "2021") %>% st_as_sf()
+
+ccaa <- ccaa %>%
+  mutate(
+    Territorio = ine.ccaa.name %>%
+      str_squish() %>%
+      str_remove("^\\d+\\s+") %>%
+      str_remove(",.*$") %>%
+      str_replace("Illes Balears", "Baleares") %>%
+      str_replace("Catalunya", "Cataluña") %>%
+      str_replace("Comunidad Valenciana", "Comunitat Valenciana") %>%
+      str_replace("La Rioja", "Rioja") %>%
+      str_replace("Comunidad de Madrid", "Madrid")
+  ) %>%
+  select(Territorio, geometry)
+
+CSE_tasas<-CSE_solo_comunidades%>%
+  mutate(Tasa_100k=(Total/Poblacion)*100000)%>%
+  mutate(Año=as.factor(Año))
+
+CSE_map_F_tasas <- ccaa %>%
+  left_join(CSE_tasas, by = "Territorio")
+
+mapas_tasas <- CSE_map_F_tasas %>%
+  filter(!is.na(Año)) %>%
+  ggplot() +
+  geom_sf(aes(fill = Tasa_100k), color = "white", linewidth = 0.1) +
+  facet_wrap(~ Año, ncol = 5) +
+  scale_fill_gradient(
+    low="white",
+    high = "black",
+    trans="sqrt",
+    na.value="grey95",
+    name="Tasa"
+  )+
+  theme_void()+
+  labs(
+    title = "Tasa de Suicidio por CCAA por 100.000 hab."
+  )+
+  theme(
+    plot.title.position = "plot",
+    legend.position = "right"
+  )
+
+print(mapas_tasas)
+```
+```{r eval=FALSE, include=FALSE}
+CSE_con_tasas <- CSE_solo_comunidades %>% 
+  mutate(Tasa_Suicidios=Total/Poblacion) 
+
+CSE_con_tasas %>% 
+  arrange(desc(Tasa_Suicidios))
+```
+
+Habiendo considerado la población de cada comunidad, se peude observar que Asturias aparece repetidamente como la comunidad con tasas más elevadas a lo largo de los años, destacando también Galicia y Canarias sobre todo en los años más próximos.
+
+Andalucía, Cataluña, Comunidad Valenciana y Madrid ya no destacan sobre el resto ya que comparado con su población no tienen tantos suicidios. En definitiva, los mapas muestran que las tasas más elevadas se concentran en la franja noroeste del país. Con el primer conjunto de mapas que se mostró ya se ha podido vislumbrar que la población influye en el número total de suicidios. ¿Se puede decir entonces que están correlacionados?
+
+Obteniendo la correlación de Pearson entre el número de suicidios y el total de población para la comunidades autónomas, resulta que este es de 0.95, es decir, existe una fuerte relación lineal entre los suicidios y el total de población y, consecuentemente, entre los suicidios y la comunidad autónoma.
+```{r Correlacion con poblacion de comunidades autonomas, echo=FALSE,message=FALSE,warning=FALSE}
+CSE_tidy_con_poblacion %>% 
+  group_by(Año, Territorio) %>% 
+  summarise(
+    Total=sum(Total, na.rm=TRUE),
+    Poblacion=sum(Poblacion, na.rm=TRUE),
+    .groups = "drop"
+  ) %>% 
+  ungroup() %>% 
+  summarise(correlacion=cor(Total, Poblacion))%>%
+  kable(digits = 4)
+```
+
+```{r, echo=FALSE, eval=FALSE, incluse=FALSE}
+CSE_solo_comunidades%>% 
+  ungroup() %>% 
+  group_by(Año) %>% 
+  summarise(`Correlación`=cor(Total, Poblacion))
+```
+
+Si se visualza la población frente a los suicidios (con el correpondiente ajuste lineal) se obtiene lo siguiente:
+```{r, echo=FALSE, warning=FALSE,message=FALSE, out.width="85%"}
+CSE_tidy_con_poblacion %>% 
+  group_by(Año, Territorio) %>% 
+  summarise(
+    Total=sum(Total, na.rm=TRUE),
+    Poblacion=sum(Poblacion, na.tm=TRUE),
+    .groups = "drop"
+  ) %>% 
+  ggplot(aes(x = Poblacion, y = Total)) +
+  geom_point( aes(color=Territorio)) +
+  geom_smooth(method = "lm")+ 
+  theme(legend.position = "None")+
+  labs(title="Población frente a Total de suicidios por comunidades autónomas",
+       y="Suicidios totales")
+```
+
+Efectivamente se observa que existe una relación fuertemente positiva entre población y total de suicidios. Esto confirma que las cifras absolutas están fuertemente condicionada por el tamaño poblacional lo que refuerza aún más las idea del uso de tasas poblacionales para comparar las regiones.
+
+
+# Conclusiones
+
+El análisis sobre los datos de suicidios en España nos ha permitido identificar patrones relevantes que nos ayudan a comprender mejor este fenómeno. La realización de gráficos y tests estadísticos, así como el análisis de correlaciones, nos ha permitido establecer una realción entre las tasas de suicidios y variables sociodemográficas como el sexo, la población o la nacionalidad.
+
+Los datos muestran que ciertos grupos presentan tasas notablemente superiores, destacando la gran diferencia en el sexo. Esto subraya la necesidad de diseñar estrategias de prevención más específicas y adaptadas a cada grupo.
+
+Así mismo, el estudio también revela una mayor concentración de suicidios en ciertas épocas del año, correspondiéndose estas con los meses de verano, así como en personas de mediana edad.
+
+El análisis realizado desvela la importancia de abordar el tema tratándolo desde una perspectiva integral, desarollando iniciativas preventivas eficaces y mejorando los sistemas de apoyo a la población de riesgo.
